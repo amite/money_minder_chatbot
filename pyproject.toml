@@ -1,0 +1,25 @@
+[project]
+name = "money-minder-chatbot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=7.1.0",
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.5",
+    "ollama>=0.6.1",
+    "pandas>=2.3.3",
+    "python-dotenv>=1.2.1",
+    "qdrant-client>=1.16.1",
+    "seaborn>=0.13.2",
+    "streamlit>=1.52.1",
+]
+
+[dependency-groups]
+dev = ["black>=24.0.0"]
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+include = '\.pyi?$'
