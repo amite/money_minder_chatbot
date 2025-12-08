@@ -112,13 +112,16 @@ class TransactionVectorStore:
         """Semantic search on transaction descriptions"""
         query_vector = self._generate_embedding(query)
 
-        results = self.client.search(  # type: ignore[attr-defined]
-            collection_name=self.collection_name, query_vector=query_vector, limit=limit
+        results = self.client.query_points(
+            collection_name=self.collection_name, query=query_vector, limit=limit
         )
 
         transactions = []
-        for result in results:
-            transactions.append({**result.payload, "score": result.score})
+        for result in results.points:
+            if result.payload:
+                transaction = dict(result.payload)
+                transaction["score"] = result.score
+                transactions.append(transaction)
 
         return transactions
 
