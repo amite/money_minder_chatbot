@@ -27,6 +27,12 @@ QDRANT_URL=https://qdrant.local
 For **Local Qdrant** (default):
 - No environment variables needed - will connect to `localhost:6333` automatically
 
+### Boot up the app
+```bash
+streamlit run app
+```
+
+
 ### **Data Structure Example (transactions.csv)**
 ```csv
 date,description,category,amount,merchant
@@ -34,6 +40,8 @@ date,description,category,amount,merchant
 2024-01-16,Amazon Purchase,shopping,89.99,Amazon
 2024-01-17,Netflix Subscription,entertainment,15.99,Netflix
 ```
+
+
 
 ### **Tool Calling Setup**
 Create 3 tools for structured queries:
