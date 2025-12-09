@@ -346,6 +346,68 @@ class StructuredLogger:
 
         self.logger.warning(message, extra=extra)
 
+    def log_dataframe(
+        self,
+        dataframe,
+        tool_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+        query_id: Optional[str] = None,
+        max_rows: int = 10,
+        **kwargs: Any,
+    ) -> None:
+        """Log dataframe (first N rows)"""
+        try:
+            import pandas as pd
+
+            if dataframe is None or not isinstance(dataframe, pd.DataFrame):
+                return
+
+            if dataframe.empty:
+                dataframe_data = {
+                    "row_count": 0,
+                    "column_count": 0,
+                    "columns": [],
+                    "rows": [],
+                }
+            else:
+                # Get first N rows
+                sample_df = dataframe.head(max_rows)
+
+                # Convert to records (list of dicts)
+                rows = sample_df.to_dict("records")
+
+                # Get column names
+                columns = list(dataframe.columns)
+
+                dataframe_data = {
+                    "row_count": len(dataframe),
+                    "column_count": len(columns),
+                    "columns": columns,
+                    "rows": rows,
+                    "sample_rows_logged": min(max_rows, len(dataframe)),
+                }
+
+            extra = {
+                "event_type": "dataframe_generated",
+                "event_data": {
+                    "tool_name": tool_name,
+                    "dataframe": dataframe_data,
+                    **kwargs,
+                },
+            }
+            if session_id:
+                extra["session_id"] = session_id
+            if query_id:
+                extra["query_id"] = query_id
+
+            self.logger.info("Dataframe generated", extra=extra)
+        except Exception as e:
+            # If logging fails, don't break the app
+            self.logger.warning(
+                f"Failed to log dataframe: {e}",
+                extra={"event_type": "dataframe_log_error"},
+            )
+
     def _sanitize_args(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Sanitize tool arguments (remove sensitive data if needed)"""
         # For now, just return as-is

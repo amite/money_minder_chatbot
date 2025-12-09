@@ -259,7 +259,16 @@ def process_query(user_query):
 
                 # Update session state
                 if result_info.get("dataframe") is not None:
-                    st.session_state.query_dataframe = result_info["dataframe"]
+                    df = result_info["dataframe"]
+                    st.session_state.query_dataframe = df
+
+                    # Log dataframe (first 10 rows)
+                    logger.log_dataframe(
+                        dataframe=df,
+                        tool_name=callback.tool_name,
+                        session_id=session_id,
+                        query_id=query_id,
+                    )
                 st.session_state.query_title = result_info["title"]
             except Exception as e:
                 # If processing fails, continue without updating state

@@ -92,3 +92,32 @@ Agent Action:
 - Returns: {"total": 245.50, "transactions": 12, "average": 20.46}
 ```
 
+### **Test Questions (15 Questions for Quality Evaluation)**
+
+The following 15 questions are used for response quality testing and cover various query types:
+
+**Category Analysis:**
+1. How much did I spend on shopping?
+2. What were my food expenses in February 2024?
+3. Analyze my transportation expenses
+4. What's my total spending on entertainment?
+
+**Merchant Analysis:**
+5. Show me my Amazon spending
+6. Analyze my Whole Foods spending grouped by category
+7. How much did I spend at Walmart in March 2024?
+8. What categories have I spent money on at Apple?
+9. How much did I spend at CVS from January 1st to February 15th, 2024?
+10. Show me my health expenses at Uber in February
+
+**Spending Summary:**
+11. What's my spending summary for last month?
+12. Give me an overview of all my spending
+13. Show me my spending breakdown for the last 3 months
+
+**Search Queries:**
+14. Find my coffee purchases
+15. Show me all my Spotify transactions
+
+Run quality tests with: `python test_response_quality.py`
+

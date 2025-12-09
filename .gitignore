@@ -17,3 +17,8 @@ data/
 # logs
 logs/
 *.log
+
+# test results (keep README)
+test_results/*.json
+!test_results/*.md
+!test_results/README.md
