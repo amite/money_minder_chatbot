@@ -420,3 +420,19 @@ class FinancialAgent:
             return self.analyze_merchant(**kwargs)
         else:
             return f"Unknown tool: {tool_name}"
+
+    def get_langchain_tools(self):
+        """Return LangChain tool instances"""
+        from langchain_tools import (
+            SearchTransactionsTool,
+            AnalyzeByCategoryTool,
+            GetSpendingSummaryTool,
+            AnalyzeMerchantTool,
+        )
+
+        return [
+            SearchTransactionsTool(self),
+            AnalyzeByCategoryTool(self),
+            GetSpendingSummaryTool(self),
+            AnalyzeMerchantTool(self),
+        ]

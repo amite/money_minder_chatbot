@@ -1,11 +1,16 @@
 import streamlit as st
-import ollama
 import json
 import pandas as pd
 from datetime import datetime, timedelta
 import sys
 import os
 from dotenv import load_dotenv
+from typing import Any, Dict, List, Optional
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_ollama import ChatOllama
+from langchain.agents import create_agent
 
 # Load environment variables from .env file
 load_dotenv()
@@ -15,6 +20,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from agent import FinancialAgent
 from vector_store import TransactionVectorStore
+from tool_handlers import HandlerRegistry
 
 # Page config
 st.set_page_config(
@@ -24,6 +30,8 @@ st.set_page_config(
 # Initialize session state
 if "agent" not in st.session_state:
     st.session_state.agent = FinancialAgent()
+if "handler_registry" not in st.session_state:
+    st.session_state.handler_registry = HandlerRegistry(st.session_state.agent)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "transactions_loaded" not in st.session_state:
@@ -32,6 +40,56 @@ if "query_dataframe" not in st.session_state:
     st.session_state.query_dataframe = None
 if "query_title" not in st.session_state:
     st.session_state.query_title = "Sample Data Preview"
+if "langchain_agent" not in st.session_state:
+    st.session_state.langchain_agent = None
+
+
+# Global store for tool execution info (thread-safe for Streamlit)
+_tool_execution_store = {}
+
+
+class ToolExecutionCallback(BaseCallbackHandler):
+    """Callback to intercept tool execution and process results"""
+
+    def __init__(self, handler_registry: HandlerRegistry, user_query: str):
+        super().__init__()
+        self.handler_registry = handler_registry
+        self.user_query = user_query
+        self.tool_name = None
+        self.tool_args = None
+        self.tool_executed = False
+
+    def on_tool_start(
+        self, serialized: Dict[str, Any], input_str: str, **kwargs: Any
+    ) -> None:
+        """Called when a tool starts running"""
+        self.tool_name = serialized.get("name")
+        # Parse tool input to extract arguments
+        try:
+            import ast
+
+            if isinstance(input_str, dict):
+                self.tool_args = input_str
+            elif isinstance(input_str, str):
+                # Try to parse as Python literal (dict representation)
+                try:
+                    self.tool_args = ast.literal_eval(input_str)
+                except:
+                    # If that fails, try JSON
+                    try:
+                        self.tool_args = json.loads(input_str)
+                    except:
+                        # If both fail, store raw input
+                        self.tool_args = {"raw_input": input_str}
+            else:
+                self.tool_args = {}
+        except Exception as e:
+            self.tool_args = {}
+
+    def on_tool_end(self, output: str, **kwargs: Any) -> None:
+        """Called when a tool finishes running"""
+        self.tool_executed = True
+        # Don't update session state here - do it in main thread after execution
 
 
 def load_sample_data():
@@ -51,229 +109,78 @@ def load_sample_data():
         return False
 
 
-def process_query(user_query):
-    """Process user query with agent and LLM"""
-    try:
-        # Build conversation history from session state
-        messages = [
-            {
-                "role": "system",
-                "content": """You are a financial assistant that helps users analyze their transactions.
-                You have access to tools that can search transactions, analyze by category, and provide spending summaries.
-                
-                Tool selection guidelines:
-                - Use get_spending_summary when users ask about categories, want to list all categories, or need an overview of spending across categories. This tool returns spending_by_category which shows all available categories.
-                - Use analyze_by_category when users ask about spending for a specific category (e.g., "how much did I spend on food?").
-                - Use analyze_merchant when users ask about spending at a specific merchant, want to group merchant transactions by category, or need merchant-specific analysis. Set group_by_category=True when users want to see merchant spending grouped by category. Only include start_date and end_date parameters if the user explicitly mentions specific dates or time periods - do not infer dates from the query.
-                - Use search_transactions when users want to find specific transactions by description or merchant.
-                
-                Always use the appropriate tool based on the user's query. After getting tool results, provide a clear, 
-                natural language explanation of the findings. When get_spending_summary is used, you can extract and list 
-                the category names from the spending_by_category field in the results.""",
-            }
-        ]
+def get_langchain_agent():
+    """Get or create LangChain agent using LangGraph"""
+    if st.session_state.langchain_agent is None:
+        llm = ChatOllama(model="llama3.1:8b-instruct-q4_K_M", temperature=0)
+        tools = st.session_state.agent.get_langchain_tools()
 
-        # Add conversation history
+        # Create agent using LangChain's create_agent
+        agent = create_agent(llm, tools)
+
+        st.session_state.langchain_agent = agent
+
+    return st.session_state.langchain_agent
+
+
+def process_query(user_query):
+    """Process user query with LangChain agent"""
+    try:
+        # Get or create LangChain agent
+        agent = get_langchain_agent()
+
+        # Create callback to intercept tool execution
+        callback = ToolExecutionCallback(st.session_state.handler_registry, user_query)
+
+        # Build messages from conversation history
+        messages = []
         for msg in st.session_state.messages:
-            if msg["role"] in ["user", "assistant"]:
-                messages.append({"role": msg["role"], "content": msg["content"]})
+            if msg["role"] == "user":
+                messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                from langchain_core.messages import AIMessage
+
+                messages.append(AIMessage(content=msg["content"]))
 
         # Add current user query
-        messages.append({"role": "user", "content": user_query})
+        messages.append(HumanMessage(content=user_query))
 
-        # First, let the LLM decide which tool to use
-        response = ollama.chat(
-            model="llama3.1:8b-instruct-q4_K_M",
-            messages=messages,
-            tools=st.session_state.agent.get_tools(),
-        )
+        # Run the agent with messages
+        config: RunnableConfig = {"callbacks": [callback]}
+        result = agent.invoke({"messages": messages}, config=config)
 
-        # Check if LLM wants to use a tool
-        if response.message.tool_calls:
-            tool_call = response.message.tool_calls[0]
-            tool_name = tool_call.function.name
-            tool_args = dict(tool_call.function.arguments)
-
-            # Execute the tool
-            try:
-                result = st.session_state.agent.execute_tool(tool_name, **tool_args)
-
-                # Store relevant dataframe for the expander
-                try:
-                    if tool_name == "search_transactions":
-                        df = st.session_state.agent.search_transactions_df(
-                            tool_args.get("query", ""), tool_args.get("limit", 10)
-                        )
-                        st.session_state.query_dataframe = df
-                        st.session_state.query_title = (
-                            f"📊 Search Results: '{tool_args.get('query', '')}'"
-                        )
-                    elif tool_name == "analyze_by_category":
-                        df = st.session_state.agent.analyze_by_category_df(
-                            tool_args.get("category", ""),
-                            tool_args.get("start_date"),
-                            tool_args.get("end_date"),
-                        )
-                        st.session_state.query_dataframe = df
-                        category = tool_args.get("category", "")
-                        st.session_state.query_title = (
-                            f"📊 Category Analysis: {category.title()}"
-                        )
-                    elif tool_name == "get_spending_summary":
-                        df = st.session_state.agent.get_spending_summary_df(
-                            tool_args.get("period", "last_month")
-                        )
-                        st.session_state.query_dataframe = df
-
-                        # Check if query is about listing categories
-                        query_lower = user_query.lower()
-                        is_category_listing = any(
-                            word in query_lower
-                            for word in [
-                                "list",
-                                "types",
-                                "kinds",
-                                "categories",
-                                "what categories",
-                                "what kind",
-                                "what types",
-                                "expenditures",
-                                "spendings",
-                            ]
-                        )
-
-                        if is_category_listing:
-                            st.session_state.query_title = "📊 Spending Categories"
-                        else:
-                            period = (
-                                tool_args.get("period", "last_month")
-                                .replace("_", " ")
-                                .title()
-                            )
-                            st.session_state.query_title = (
-                                f"📊 Spending Summary: {period}"
-                            )
-                    elif tool_name == "analyze_merchant":
-                        df = st.session_state.agent.analyze_merchant_df(
-                            tool_args.get("merchant", ""),
-                            tool_args.get("group_by_category", False),
-                            tool_args.get("start_date"),
-                            tool_args.get("end_date"),
-                        )
-                        st.session_state.query_dataframe = df
-                        merchant = tool_args.get("merchant", "")
-                        if tool_args.get("group_by_category", False):
-                            st.session_state.query_title = (
-                                f"📊 {merchant} Spending by Category"
-                            )
-                        else:
-                            st.session_state.query_title = f"📊 {merchant} Transactions"
-                except Exception as df_error:
-                    # If dataframe extraction fails, just continue without it
-                    pass
-
-            except Exception as e:
-                error_msg = f"Error executing tool {tool_name}: {str(e)}"
-                with st.chat_message("assistant"):
-                    st.error(error_msg)
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": error_msg}
-                )
-                return
-
-            # Add tool result as context for the LLM to generate a natural language response
-            # Format: Include the tool result in a user message asking for explanation
-            tool_result_context = f"""I executed the {tool_name} tool.
-
-The tool returned these results:
-{result}
-
-Please provide a clear, natural language explanation of these results for the user. Do not include the tool parameters or function call details in your response."""
-
-            messages.append({"role": "user", "content": tool_result_context})
-
-            # Get natural language response from LLM with tool results
-            final_response = ollama.chat(
-                model="llama3.1:8b-instruct-q4_K_M",
-                messages=messages,
-            )
-
-            # Extract response content, handling various response formats
-            assistant_response = None
-            if hasattr(final_response, "message"):
-                if hasattr(final_response.message, "content"):
-                    assistant_response = final_response.message.content
-
-            # If no content, check if there's tool call info (shouldn't happen but handle it)
-            if not assistant_response:
-                # Check if response has tool calls (unexpected at this stage)
-                if hasattr(final_response, "message") and hasattr(
-                    final_response.message, "tool_calls"
-                ):
-                    if final_response.message.tool_calls:
-                        # This shouldn't happen, but if it does, create a fallback response
-                        assistant_response = f"I analyzed your {tool_name.replace('_', ' ')} request. Here are the results:\n\n{result}"
-                    else:
-                        assistant_response = "I processed your request, but couldn't generate a response."
-                else:
-                    assistant_response = (
-                        "I processed your request, but couldn't generate a response."
-                    )
-
-            # Filter out any tool call JSON that might be in the response
-            # Sometimes LLM includes tool call info in the response text
-            if assistant_response and assistant_response.strip().startswith("{"):
-                try:
-                    # Check if it's a tool call JSON structure
-                    parsed = json.loads(assistant_response)
-                    if "name" in parsed and "parameters" in parsed:
-                        # This is a tool call JSON, not a proper response - create fallback
-                        assistant_response = f"I analyzed your {tool_name.replace('_', ' ')} request. Here are the results:\n\n{result}"
-                except json.JSONDecodeError:
-                    # Not JSON, keep the response as is
-                    pass
-
-            with st.chat_message("assistant"):
-                st.markdown(assistant_response)
-
-                # Also show formatted results for better UX
-                try:
-                    result_data = json.loads(result)
-
-                    # Create visualizations for summary data
-                    if (
-                        tool_name == "get_spending_summary"
-                        or tool_name == "analyze_by_category"
-                    ):
-                        if (
-                            isinstance(result_data, dict)
-                            and "spending_by_category" in result_data
-                        ):
-                            df = pd.DataFrame(
-                                list(result_data["spending_by_category"].items()),
-                                columns=["Category", "Amount"],  # type: ignore[arg-type]
-                            )
-                            st.bar_chart(df.set_index("Category"))
-                except:
-                    # If result is not JSON, it's already in the response
-                    pass
-
-            # Save assistant response to session state
-            st.session_state.messages.append(
-                {"role": "assistant", "content": assistant_response}
+        # Extract the final response from the last message
+        if result.get("messages"):
+            last_message = result["messages"][-1]
+            response = (
+                last_message.content
+                if hasattr(last_message, "content")
+                else str(last_message)
             )
         else:
-            # If no tool call, just show the response
-            assistant_response = (
-                response.message.content or "I couldn't generate a response."
-            )
-            with st.chat_message("assistant"):
-                st.markdown(assistant_response)
+            response = str(result)
 
-            # Save assistant response to session state
-            st.session_state.messages.append(
-                {"role": "assistant", "content": assistant_response}
-            )
+        # Update session state with tool results (in main thread)
+        if callback.tool_executed and callback.tool_name and callback.tool_args:
+            try:
+                result_info = callback.handler_registry.handle_result(
+                    callback.tool_name, callback.tool_args, user_query
+                )
+
+                # Update session state
+                if result_info.get("dataframe") is not None:
+                    st.session_state.query_dataframe = result_info["dataframe"]
+                st.session_state.query_title = result_info["title"]
+            except Exception as e:
+                # If processing fails, continue without updating state
+                pass
+
+        # Display the response
+        with st.chat_message("assistant"):
+            st.markdown(response)
+
+        # Save assistant response to session state
+        st.session_state.messages.append({"role": "assistant", "content": response})
 
     except Exception as e:
         error_msg = f"Error processing query: {str(e)}"
