@@ -13,7 +13,26 @@ class FinancialAgent:
                 "type": "function",
                 "function": {
                     "name": "search_transactions",
-                    "description": "Search for transactions by description, category, or merchant",
+                    "description": """Search for transactions by description keywords or text.
+
+USE THIS WHEN:
+- User searches by description keywords (e.g., "coffee", "subscription", "gas")
+- User wants to find transactions matching text in descriptions
+- User asks "Find my [item] purchases" or "Show me [keyword] transactions"
+- User wants to search across all merchants/categories by description
+
+DO NOT USE FOR:
+- Queries about a specific merchant (use analyze_merchant)
+- Queries about a specific category (use analyze_by_category)
+- Queries about spending summaries (use get_spending_summary)
+
+Examples:
+✓ "Find my coffee purchases"
+✓ "Show me all my Spotify transactions" (searching by description)
+✓ "Search for subscription payments"
+✓ "Find transactions with 'grocery' in description"
+✗ "Show my Amazon spending" (use analyze_merchant - specific merchant)
+✗ "How much did I spend on food?" (use analyze_by_category - specific category)""",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -35,7 +54,26 @@ class FinancialAgent:
                 "type": "function",
                 "function": {
                     "name": "analyze_by_category",
-                    "description": "Analyze spending for a SPECIFIC single category (e.g., 'shopping', 'food', 'entertainment'). Use this tool when the user asks about spending in ONE specific category. Examples: 'How much did I spend on shopping?', 'What were my food expenses?', 'Show me entertainment spending'. DO NOT use this for queries about multiple categories or general spending overviews - use get_spending_summary instead.",
+                    "description": """Analyze spending for a SPECIFIC single category.
+
+USE THIS WHEN:
+- User asks about spending in ONE specific category (food, shopping, entertainment, transport, utilities, health)
+- User mentions category WITHOUT mentioning a specific merchant
+- User asks "How much did I spend on [category]?"
+
+DO NOT USE FOR:
+- Queries mentioning a specific merchant (use analyze_merchant instead)
+- Keyword searches by description (use search_transactions)
+- Queries about multiple categories (use get_spending_summary)
+- Queries like "Whole Foods" (this is a merchant, not a category)
+
+Examples:
+✓ "How much did I spend on shopping?"
+✓ "What were my food expenses in February?"
+✓ "Show me entertainment spending"
+✗ "Analyze Whole Foods spending" (use analyze_merchant - Whole Foods is a merchant)
+✗ "Find coffee purchases" (use search_transactions - keyword search)
+✗ "Show me my health expenses at Uber" (use analyze_merchant - merchant mentioned)""",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -77,7 +115,28 @@ class FinancialAgent:
                 "type": "function",
                 "function": {
                     "name": "analyze_merchant",
-                    "description": "Analyze spending for a specific merchant, optionally grouped by category. Use this tool when users ask about spending at a specific merchant, want to see merchant transactions grouped by category, or need merchant-specific analysis.",
+                    "description": """Analyze spending for a specific merchant.
+
+USE THIS WHEN:
+- User mentions a specific merchant name (Amazon, Walmart, Starbucks, Whole Foods, CVS, Uber, Spotify, etc.)
+- User wants merchant spending grouped by category
+- User asks "How much at [merchant]?" or "Show me [merchant] spending"
+- User mentions BOTH merchant AND category (prioritize merchant)
+- User asks about merchant transactions with date filters
+
+DO NOT USE FOR:
+- General category queries without merchant mention
+- Keyword searches by description (use search_transactions)
+- Queries like "coffee purchases" without merchant name
+
+Examples:
+✓ "Show my Amazon spending"
+✓ "Analyze Whole Foods spending grouped by category"
+✓ "How much did I spend at Walmart in March?"
+✓ "Show me my health expenses at Uber in February" (merchant + category → use merchant tool)
+✓ "What categories have I spent money on at Apple?"
+✗ "Find coffee purchases" (use search_transactions - no merchant mentioned)
+✗ "How much did I spend on shopping?" (use analyze_by_category - no merchant)""",
                     "parameters": {
                         "type": "object",
                         "properties": {
