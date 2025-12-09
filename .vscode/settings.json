@@ -17,5 +17,6 @@
   "black-formatter.path": [],
   "jupyter.kernels.excludePythonEnvironments": [
     "${workspaceFolder}/.venv"
-  ]
+  ],
+  "specstory.cloudSync.enabled": "always"
 }
