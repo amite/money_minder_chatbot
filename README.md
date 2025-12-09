@@ -121,3 +121,52 @@ The following 15 questions are used for response quality testing and cover vario
 
 Run quality tests with: `python test_response_quality.py`
 
+## Current Architecture
+
+Analyzing the architecture to determine if this is a RAG agent:
+
+
+[3 tools called]
+
+
+This is a hybrid system, not a pure RAG agent.
+
+## What it is
+
+### Tool-using agent (primary pattern)
+- Uses LangChain with function calling
+- LLM selects tools based on the query
+- Tools execute and return structured data
+- LLM formats the response
+
+### Partial RAG (one tool)
+- `search_transactions` uses vector similarity search:
+  - Embeds query and transactions in Qdrant
+  - Retrieves similar transactions
+  - Returns results to the LLM
+
+### Non-RAG tools (most tools)
+- `analyze_by_category`: Gets all transactions, filters by category/date
+- `get_spending_summary`: Gets all transactions, aggregates by category
+- `analyze_merchant`: Gets all transactions, filters by merchant
+
+## Architecture comparison
+
+**Pure RAG pattern:**
+```
+Query → Vector Search → Retrieve Context → Augment Prompt → LLM → Response
+```
+
+**This app's pattern:**
+```
+Query → LLM → Tool Selection → Tool Execution (may use vector search) → LLM → Response
+```
+
+## Classification
+
+- Tool-using agent (primary)
+- Hybrid: one RAG tool (`search_transactions`), others are structured queries
+- Not pure RAG: most tools don't use retrieval; they filter/aggregate all data
+
+The vector store is used for semantic search in one tool, but most analysis tools work directly on the full dataset rather than retrieving relevant chunks.
+

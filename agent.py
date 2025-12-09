@@ -35,13 +35,13 @@ class FinancialAgent:
                 "type": "function",
                 "function": {
                     "name": "analyze_by_category",
-                    "description": "Analyze spending by category within a date range",
+                    "description": "Analyze spending for a SPECIFIC single category (e.g., 'shopping', 'food', 'entertainment'). Use this tool when the user asks about spending in ONE specific category. Examples: 'How much did I spend on shopping?', 'What were my food expenses?', 'Show me entertainment spending'. DO NOT use this for queries about multiple categories or general spending overviews - use get_spending_summary instead.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "category": {
                                 "type": "string",
-                                "description": "Transaction category (food, shopping, entertainment, transport, utilities, health)",
+                                "description": "Transaction category (food, shopping, entertainment, transport, utilities, health). Example queries: 'How much did I spend on shopping?', 'What were my food expenses in February?', 'Show me entertainment spending'.",
                             },
                             "start_date": {
                                 "type": "string",
@@ -60,13 +60,13 @@ class FinancialAgent:
                 "type": "function",
                 "function": {
                     "name": "get_spending_summary",
-                    "description": "Get summary statistics of spending. Returns spending breakdown by category, which can be used to list all available categories. Use this tool when users ask about categories, want to see all spending categories, or need an overview of spending across all categories.",
+                    "description": "Get summary statistics showing spending breakdown across ALL categories. Use this tool when users want an overview of spending across multiple/all categories, want to see all available categories, or ask for general spending summaries. DO NOT use this for queries about a single specific category - use analyze_by_category instead. Examples: 'Give me an overview of all my spending', 'What's my spending summary?', 'Show me all my spending categories'.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "period": {
                                 "type": "string",
-                                "description": "Time period (last_week, last_month, last_3_months, all_time)",
+                                "description": "Time period (last_week, last_month, last_3_months, all_time). Example queries: 'Give me an overview of all my spending', 'What's my spending summary for last month?', 'Show me all my spending categories'.",
                                 "default": "last_month",
                             }
                         },
