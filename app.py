@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import sys
 import os
+import time
+import uuid
 from dotenv import load_dotenv
 from typing import Any, Dict, List, Optional
 from langchain_core.callbacks import BaseCallbackHandler
@@ -21,11 +23,15 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from agent import FinancialAgent
 from vector_store import TransactionVectorStore
 from tool_handlers import HandlerRegistry
+from logger import get_logger
 
 # Page config
 st.set_page_config(
     page_title="Financial Transaction Agent", page_icon="💰", layout="wide"
 )
+
+# Initialize logger
+logger = get_logger()
 
 # Initialize session state
 if "agent" not in st.session_state:
@@ -42,6 +48,8 @@ if "query_title" not in st.session_state:
     st.session_state.query_title = "Sample Data Preview"
 if "langchain_agent" not in st.session_state:
     st.session_state.langchain_agent = None
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 
 # Global store for tool execution info (thread-safe for Streamlit)
@@ -51,19 +59,29 @@ _tool_execution_store = {}
 class ToolExecutionCallback(BaseCallbackHandler):
     """Callback to intercept tool execution and process results"""
 
-    def __init__(self, handler_registry: HandlerRegistry, user_query: str):
+    def __init__(
+        self,
+        handler_registry: HandlerRegistry,
+        user_query: str,
+        session_id: str,
+        query_id: str,
+    ):
         super().__init__()
         self.handler_registry = handler_registry
         self.user_query = user_query
+        self.session_id = session_id
+        self.query_id = query_id
         self.tool_name = None
         self.tool_args = None
         self.tool_executed = False
+        self.tool_start_time = None
 
     def on_tool_start(
         self, serialized: Dict[str, Any], input_str: str, **kwargs: Any
     ) -> None:
         """Called when a tool starts running"""
         self.tool_name = serialized.get("name")
+        self.tool_start_time = time.time()
         # Parse tool input to extract arguments
         try:
             import ast
@@ -86,9 +104,37 @@ class ToolExecutionCallback(BaseCallbackHandler):
         except Exception as e:
             self.tool_args = {}
 
+        # Log tool execution start
+        if self.tool_name:
+            logger.log_tool_execution_start(
+                tool_name=self.tool_name,
+                tool_args=self.tool_args or {},
+                session_id=self.session_id,
+                query_id=self.query_id,
+            )
+
     def on_tool_end(self, output: str, **kwargs: Any) -> None:
         """Called when a tool finishes running"""
         self.tool_executed = True
+        execution_time = (
+            time.time() - self.tool_start_time if self.tool_start_time else 0
+        )
+
+        # Create result summary (truncate if too long)
+        result_summary = str(output)[:200] if output else None
+        if result_summary and len(str(output)) > 200:
+            result_summary += "..."
+
+        # Log tool execution end
+        if self.tool_name:
+            logger.log_tool_execution_end(
+                tool_name=self.tool_name,
+                execution_time=execution_time,
+                success=True,
+                result_summary=result_summary,
+                session_id=self.session_id,
+                query_id=self.query_id,
+            )
         # Don't update session state here - do it in main thread after execution
 
 
@@ -103,9 +149,27 @@ def load_sample_data():
 
         st.session_state.transactions_loaded = True
         st.success(f"Loaded {len(transactions)} sample transactions!")
+
+        # Log successful data load
+        logger.log_metric(
+            metric_name="transactions_loaded",
+            value=len(transactions),
+            unit="count",
+            session_id=st.session_state.get("session_id"),
+        )
+
         return True
     except Exception as e:
-        st.error(f"Error loading data: {e}")
+        error_msg = f"Error loading data: {e}"
+        st.error(error_msg)
+
+        # Log error
+        logger.log_error(
+            error=e,
+            context={"function": "load_sample_data"},
+            session_id=st.session_state.get("session_id"),
+        )
+
         return False
 
 
@@ -125,12 +189,33 @@ def get_langchain_agent():
 
 def process_query(user_query):
     """Process user query with LangChain agent"""
+    query_id = str(uuid.uuid4())
+    session_id = st.session_state.get("session_id", "unknown")
+    process_start_time = time.time()
+
+    # Log query and processing start
+    logger.log_query(
+        query=user_query,
+        session_id=session_id,
+        query_id=query_id,
+    )
+    logger.log_query_processing_start(
+        query=user_query,
+        session_id=session_id,
+        query_id=query_id,
+    )
+
     try:
         # Get or create LangChain agent
         agent = get_langchain_agent()
 
         # Create callback to intercept tool execution
-        callback = ToolExecutionCallback(st.session_state.handler_registry, user_query)
+        callback = ToolExecutionCallback(
+            st.session_state.handler_registry,
+            user_query,
+            session_id,
+            query_id,
+        )
 
         # Build messages from conversation history
         messages = []
@@ -160,8 +245,13 @@ def process_query(user_query):
         else:
             response = str(result)
 
+        # Calculate response time
+        response_time = time.time() - process_start_time
+
         # Update session state with tool results (in main thread)
+        tool_used = None
         if callback.tool_executed and callback.tool_name and callback.tool_args:
+            tool_used = callback.tool_name
             try:
                 result_info = callback.handler_registry.handle_result(
                     callback.tool_name, callback.tool_args, user_query
@@ -173,7 +263,25 @@ def process_query(user_query):
                 st.session_state.query_title = result_info["title"]
             except Exception as e:
                 # If processing fails, continue without updating state
-                pass
+                logger.log_warning(
+                    message="Failed to process tool result",
+                    context={
+                        "function": "process_query",
+                        "tool_name": callback.tool_name,
+                        "error": str(e),
+                    },
+                    session_id=session_id,
+                )
+
+        # Log response generation
+        logger.log_response(
+            query=user_query,
+            response=response,
+            response_time=response_time,
+            tool_used=tool_used,
+            session_id=session_id,
+            query_id=query_id,
+        )
 
         # Display the response
         with st.chat_message("assistant"):
@@ -182,8 +290,29 @@ def process_query(user_query):
         # Save assistant response to session state
         st.session_state.messages.append({"role": "assistant", "content": response})
 
+        # Log response displayed
+        logger.log_response_displayed(
+            response=response,
+            session_id=session_id,
+            query_id=query_id,
+        )
+
     except Exception as e:
         error_msg = f"Error processing query: {str(e)}"
+        response_time = time.time() - process_start_time
+
+        # Log error with full context
+        logger.log_error(
+            error=e,
+            context={
+                "function": "process_query",
+                "user_query": user_query,
+                "response_time": response_time,
+            },
+            session_id=session_id,
+            query_id=query_id,
+        )
+
         with st.chat_message("assistant"):
             st.error(error_msg)
         st.session_state.messages.append({"role": "assistant", "content": error_msg})

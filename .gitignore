@@ -13,3 +13,7 @@ wheels/
 data/
 
 .env
+
+# logs
+logs/
+*.log
