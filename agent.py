@@ -83,11 +83,11 @@ Examples:
                             },
                             "start_date": {
                                 "type": "string",
-                                "description": "Start date in YYYY-MM-DD format",
+                                "description": "Start date in YYYY-MM-DD format. When user mentions a month (e.g., 'February 2024'), use the first day of that month (e.g., '2024-02-01'). When user mentions a quarter (e.g., 'Q1 2024'), use the first day of that quarter (e.g., '2024-01-01'). When user mentions a specific date range, use the start of that range. Examples: 'February 2024' → '2024-02-01', 'in March' → '2024-03-01', 'from January 1st' → '2024-01-01', 'Q1 2024' → '2024-01-01'.",
                             },
                             "end_date": {
                                 "type": "string",
-                                "description": "End date in YYYY-MM-DD format",
+                                "description": "End date in YYYY-MM-DD format. When user mentions a month (e.g., 'February 2024'), use the last day of that month (e.g., '2024-02-29' for February 2024, '2024-02-28' for non-leap years). When user mentions a quarter, use the last day of that quarter. When user mentions a specific date range, use the end of that range. Examples: 'February 2024' → '2024-02-29', 'through March 15th' → '2024-03-15', 'Q1 2024' → '2024-03-31'.",
                             },
                         },
                         "required": ["category"],
@@ -151,11 +151,11 @@ Examples:
                             },
                             "start_date": {
                                 "type": "string",
-                                "description": "Start date in YYYY-MM-DD format. Only include if user explicitly mentions a specific date or time period (e.g., 'in January', 'this year', 'from 2024-01-01'). Do not infer or guess dates.",
+                                "description": "Start date in YYYY-MM-DD format. Only include if user explicitly mentions a specific date or time period (e.g., 'in January', 'this year', 'from 2024-01-01'). Do not infer or guess dates. When user mentions a month (e.g., 'in February', 'February 2024'), use the first day of that month (e.g., '2024-02-01'). When user mentions a quarter, use the first day of that quarter. Examples: 'in February' → '2024-02-01', 'from January 1st' → '2024-01-01', 'Q1 2024' → '2024-01-01'.",
                             },
                             "end_date": {
                                 "type": "string",
-                                "description": "End date in YYYY-MM-DD format. Only include if user explicitly mentions a specific date or time period. Do not infer or guess dates.",
+                                "description": "End date in YYYY-MM-DD format. Only include if user explicitly mentions a specific date or time period. Do not infer or guess dates. When user mentions a month (e.g., 'in February', 'February 2024'), use the last day of that month (e.g., '2024-02-29' for February 2024). When user mentions a quarter, use the last day of that quarter. Examples: 'in February' → '2024-02-29', 'through March 15th' → '2024-03-15', 'Q1 2024' → '2024-03-31'.",
                             },
                         },
                         "required": ["merchant"],
@@ -189,11 +189,16 @@ Examples:
         # Filter by category
         filtered = df[df["category"].str.lower() == category.lower()]
 
+        # Convert date to datetime before filtering
+        filtered["date"] = pd.to_datetime(filtered["date"])
+
         # Filter by date if provided
         if start_date:
-            filtered = filtered[filtered["date"] >= start_date]
+            start_dt = pd.to_datetime(start_date)
+            filtered = filtered[filtered["date"] >= start_dt]
         if end_date:
-            filtered = filtered[filtered["date"] <= end_date]
+            end_dt = pd.to_datetime(end_date)
+            filtered = filtered[filtered["date"] <= end_dt]
 
         if len(filtered) == 0:
             return f"No transactions found for category: {category}"
@@ -225,11 +230,16 @@ Examples:
         # Filter by category
         filtered = df[df["category"].str.lower() == category.lower()]
 
+        # Convert date to datetime before filtering
+        filtered["date"] = pd.to_datetime(filtered["date"])
+
         # Filter by date if provided
         if start_date:
-            filtered = filtered[filtered["date"] >= start_date]
+            start_dt = pd.to_datetime(start_date)
+            filtered = filtered[filtered["date"] >= start_dt]
         if end_date:
-            filtered = filtered[filtered["date"] <= end_date]
+            end_dt = pd.to_datetime(end_date)
+            filtered = filtered[filtered["date"] <= end_dt]
 
         if len(filtered) == 0:
             return pd.DataFrame()
@@ -343,12 +353,17 @@ Examples:
         # Filter by merchant
         filtered: pd.DataFrame = df[df["merchant"].str.lower() == merchant.lower()]  # type: ignore[assignment]
 
+        # Convert date to datetime before filtering
+        filtered["date"] = pd.to_datetime(filtered["date"])
+
         # Filter by date if provided
         original_count = len(filtered)
         if start_date:
-            filtered = filtered[filtered["date"] >= start_date]  # type: ignore[assignment]
+            start_dt = pd.to_datetime(start_date)
+            filtered = filtered[filtered["date"] >= start_dt]  # type: ignore[assignment]
         if end_date:
-            filtered = filtered[filtered["date"] <= end_date]  # type: ignore[assignment]
+            end_dt = pd.to_datetime(end_date)
+            filtered = filtered[filtered["date"] <= end_dt]  # type: ignore[assignment]
 
         if len(filtered) == 0:
             # If we had transactions before date filtering, the date range might be wrong
@@ -411,11 +426,16 @@ Examples:
         # Filter by merchant
         filtered: pd.DataFrame = df[df["merchant"].str.lower() == merchant.lower()]  # type: ignore[assignment]
 
+        # Convert date to datetime before filtering
+        filtered["date"] = pd.to_datetime(filtered["date"])
+
         # Filter by date if provided
         if start_date:
-            filtered = filtered[filtered["date"] >= start_date]  # type: ignore[assignment]
+            start_dt = pd.to_datetime(start_date)
+            filtered = filtered[filtered["date"] >= start_dt]  # type: ignore[assignment]
         if end_date:
-            filtered = filtered[filtered["date"] <= end_date]  # type: ignore[assignment]
+            end_dt = pd.to_datetime(end_date)
+            filtered = filtered[filtered["date"] <= end_dt]  # type: ignore[assignment]
 
         if len(filtered) == 0:
             return pd.DataFrame()

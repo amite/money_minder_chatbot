@@ -58,10 +58,12 @@ class AnalyzeByCategoryInput(BaseModel):
         description="Transaction category (food, shopping, entertainment, transport, utilities, health). Example queries: 'How much did I spend on shopping?', 'What were my food expenses in February?', 'Show me entertainment spending'."
     )
     start_date: Optional[str] = Field(
-        default=None, description="Start date in YYYY-MM-DD format"
+        default=None,
+        description="Start date in YYYY-MM-DD format. When user mentions a month (e.g., 'February 2024'), use the first day of that month (e.g., '2024-02-01'). When user mentions a quarter (e.g., 'Q1 2024'), use the first day of that quarter (e.g., '2024-01-01'). When user mentions a specific date range, use the start of that range. Examples: 'February 2024' → '2024-02-01', 'in March' → '2024-03-01', 'from January 1st' → '2024-01-01', 'Q1 2024' → '2024-01-01'.",
     )
     end_date: Optional[str] = Field(
-        default=None, description="End date in YYYY-MM-DD format"
+        default=None,
+        description="End date in YYYY-MM-DD format. When user mentions a month (e.g., 'February 2024'), use the last day of that month (e.g., '2024-02-29' for February 2024, '2024-02-28' for non-leap years). When user mentions a quarter, use the last day of that quarter. When user mentions a specific date range, use the end of that range. Examples: 'February 2024' → '2024-02-29', 'through March 15th' → '2024-03-15', 'Q1 2024' → '2024-03-31'.",
     )
 
 
@@ -159,11 +161,11 @@ class AnalyzeMerchantInput(BaseModel):
     )
     start_date: Optional[str] = Field(
         default=None,
-        description="Start date in YYYY-MM-DD format. Only include if user explicitly mentions a specific date or time period (e.g., 'in January', 'this year', 'from 2024-01-01'). Do not infer or guess dates.",
+        description="Start date in YYYY-MM-DD format. Only include if user explicitly mentions a specific date or time period (e.g., 'in January', 'this year', 'from 2024-01-01'). Do not infer or guess dates. When user mentions a month (e.g., 'in February', 'February 2024'), use the first day of that month (e.g., '2024-02-01'). When user mentions a quarter, use the first day of that quarter. Examples: 'in February' → '2024-02-01', 'from January 1st' → '2024-01-01', 'Q1 2024' → '2024-01-01'.",
     )
     end_date: Optional[str] = Field(
         default=None,
-        description="End date in YYYY-MM-DD format. Only include if user explicitly mentions a specific date or time period. Do not infer or guess dates.",
+        description="End date in YYYY-MM-DD format. Only include if user explicitly mentions a specific date or time period. Do not infer or guess dates. When user mentions a month (e.g., 'in February', 'February 2024'), use the last day of that month (e.g., '2024-02-29' for February 2024). When user mentions a quarter, use the last day of that quarter. Examples: 'in February' → '2024-02-29', 'through March 15th' → '2024-03-15', 'Q1 2024' → '2024-03-31'.",
     )
 
 
