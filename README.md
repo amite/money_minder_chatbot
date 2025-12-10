@@ -141,7 +141,7 @@ The following 15 complex scenarios test multi-step reasoning, comparative analys
 14. Show me all gas station transactions where I also bought food
 15. Find all shopping transactions over $50 at either Amazon or Target in February
 
-Run complex scenario tests with: `python test_results/complex_scenarios_tests_runner.py`
+Run complex scenario tests with: `python test_results/test_complex_scenarios_runner.py`
 
 ## Current Architecture
 
