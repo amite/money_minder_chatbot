@@ -5,12 +5,24 @@ Integrates with your existing test infrastructure
 
 import json
 import time
+import sys
+import os
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 import pandas as pd
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agent import FinancialAgent
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import HumanMessage
 
 
 class ComplexScenarioEvaluator:
@@ -19,20 +31,86 @@ class ComplexScenarioEvaluator:
     def __init__(
         self,
         agent: FinancialAgent,
-        scenarios_file: str = "tests/complex_scenarios.json",
+        scenarios_file: Optional[str] = None,
     ):
         self.agent = agent
+        # Get project root directory
+        self.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        # Default to test_results directory if scenarios_file not provided
+        if scenarios_file is None:
+            scenarios_file = os.path.join(
+                self.project_root, "test_results", "complex_scenarios.json"
+            )
+        elif not os.path.isabs(scenarios_file):
+            scenarios_file = os.path.join(self.project_root, scenarios_file)
+
         self.scenarios = self._load_scenarios(scenarios_file)
+        if self.scenarios:
+            print(f"✓ Loaded {len(self.scenarios)} test scenarios")
         self.results = []
 
         # Load evaluation framework
-        with open("tests/evaluation_framework.json") as f:
-            self.framework = json.load(f)
+        framework_file = os.path.join(
+            self.project_root, "test_results", "evaluation_framework.json"
+        )
+        if os.path.exists(framework_file):
+            try:
+                with open(framework_file) as f:
+                    content = f.read().strip()
+                    if content:
+                        self.framework = json.loads(content)
+                    else:
+                        # File exists but is empty, use default
+                        print(
+                            f"Warning: {framework_file} is empty, using default framework"
+                        )
+                        self.framework = self._get_default_framework()
+            except json.JSONDecodeError as e:
+                # Invalid JSON, use default
+                print(
+                    f"Warning: {framework_file} contains invalid JSON ({e}), using default framework"
+                )
+                self.framework = self._get_default_framework()
+        else:
+            # Use default framework if file doesn't exist
+            self.framework = self._get_default_framework()
 
     def _load_scenarios(self, filename: str) -> List[Dict]:
         """Load test scenarios"""
-        with open(filename) as f:
-            return json.load(f)
+        if not os.path.exists(filename):
+            return []
+        try:
+            with open(filename) as f:
+                scenarios = json.load(f)
+                if not isinstance(scenarios, list):
+                    print(f"Warning: Scenarios file {filename} does not contain a list")
+                    return []
+                return scenarios
+        except json.JSONDecodeError as e:
+            print(f"Warning: Could not parse scenarios file {filename}: {e}")
+            return []
+
+    def _get_default_framework(self) -> Dict:
+        """Return default evaluation framework if file doesn't exist"""
+        return {
+            "scoring": {
+                "tool_selection": {"weight": 0.25},
+                "reasoning": {"weight": 0.25},
+                "accuracy": {"weight": 0.30},
+                "completeness": {"weight": 0.20},
+            },
+            "difficulty_multipliers": {
+                "easy": 1.0,
+                "medium": 1.2,
+                "hard": 1.5,
+            },
+            "pass_thresholds": {
+                "acceptable": 0.7,
+                "good": 0.85,
+                "excellent": 0.95,
+            },
+        }
 
     def evaluate_single_scenario(self, scenario: Dict) -> Dict:
         """Evaluate agent on a single scenario"""
@@ -47,15 +125,30 @@ class ComplexScenarioEvaluator:
             # Run agent query
             llm = ChatOllama(model="llama3.1:8b-instruct-q4_K_M", temperature=0)
             tools = self.agent.get_langchain_tools()
-            agent_executor = create_agent(llm, tools)
 
-            # Track tool calls
-            tool_calls = []
+            # Track tool calls with callback
+            class ToolCallTracker(BaseCallbackHandler):
+                def __init__(self):
+                    super().__init__()
+                    self.tool_calls = []
+
+                def on_tool_start(
+                    self, serialized: Dict[str, Any], input_str: str, **kwargs: Any
+                ) -> None:
+                    tool_name = serialized.get("name", "unknown")
+                    self.tool_calls.append(tool_name)
+
+            callback = ToolCallTracker()
+            agent_executor = create_agent(llm, tools)
 
             # Execute query
             result = agent_executor.invoke(
-                {"messages": [{"role": "user", "content": scenario["query"]}]}
+                {"messages": [HumanMessage(content=scenario["query"])]},
+                config={"callbacks": [callback]},
             )
+
+            # Get tracked tool calls
+            tool_calls = callback.tool_calls
             response = (
                 result.get("messages", [])[-1].content
                 if result.get("messages")
@@ -276,6 +369,15 @@ class ComplexScenarioEvaluator:
                 s for s in scenarios_to_run if s["difficulty"] == difficulty_filter
             ]
 
+        if not scenarios_to_run:
+            print(f"\n{'='*80}")
+            print("WARNING: No scenarios to run!")
+            print(
+                "Create a scenarios JSON file or use test_complex_scenarios.py to generate scenarios."
+            )
+            print(f"{'='*80}")
+            return self._generate_summary_report()
+
         print(f"\n{'='*80}")
         print(f"RUNNING {len(scenarios_to_run)} COMPLEX SCENARIOS")
         if difficulty_filter:
@@ -291,7 +393,24 @@ class ComplexScenarioEvaluator:
     def _generate_summary_report(self) -> Dict:
         """Generate comprehensive summary report"""
         if not self.results:
-            return {}
+            return {
+                "summary": {
+                    "total_scenarios": 0,
+                    "passed": 0,
+                    "failed": 0,
+                    "pass_rate": 0.0,
+                    "avg_response_time": 0.0,
+                    "avg_final_score": 0.0,
+                },
+                "difficulty_breakdown": {},
+                "score_breakdown": {
+                    "tool_selection": 0.0,
+                    "reasoning": 0.0,
+                    "accuracy": 0.0,
+                    "completeness": 0.0,
+                },
+                "failures": [],
+            }
 
         total = len(self.results)
         passed = sum(1 for r in self.results if r.get("passed", False))
@@ -362,28 +481,55 @@ class ComplexScenarioEvaluator:
         return report
 
     def export_results(self, filename: Optional[str] = None):
-        """Export detailed results to file"""
+        """Export detailed results to JSON and Markdown files"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"tests/complex_results_{timestamp}.json"
+            json_filename = os.path.join(
+                self.project_root, "test_results", f"complex_results_{timestamp}.json"
+            )
+            md_filename = os.path.join(
+                self.project_root,
+                "test_results",
+                f"complex_quality_report_{timestamp}.md",
+            )
+        else:
+            # If custom filename provided, derive both from it
+            base = os.path.splitext(filename)[0]
+            json_filename = f"{base}.json"
+            md_filename = f"{base}.md"
+            if not os.path.isabs(json_filename):
+                json_filename = os.path.join(self.project_root, json_filename)
+                md_filename = os.path.join(self.project_root, md_filename)
+
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(json_filename), exist_ok=True)
 
         report = self._generate_summary_report()
 
+        # Export JSON
         export_data = {
             "report": report,
             "detailed_results": self.results,
             "timestamp": datetime.now().isoformat(),
         }
 
-        with open(filename, "w") as f:
+        with open(json_filename, "w") as f:
             json.dump(export_data, f, indent=2)
 
-        print(f"\n✓ Results exported to {filename}")
+        print(f"\n✓ JSON results exported to {json_filename}")
+
+        # Export Markdown
+        md_content = self._generate_markdown_report(report, timestamp)
+        with open(md_filename, "w") as f:
+            f.write(md_content)
+
+        print(f"✓ Markdown report exported to {md_filename}")
 
         # Print summary
         self._print_summary_report(report)
 
-        return filename
+        return json_filename, md_filename
 
     def _print_summary_report(self, report: Dict):
         """Print formatted summary report"""
@@ -423,6 +569,245 @@ class ComplexScenarioEvaluator:
                 if "error" in failure:
                     print(f"     Error: {failure['error']}")
 
+    def _generate_markdown_report(self, report: Dict, timestamp: str) -> str:
+        """Generate a comprehensive markdown report"""
+        summary = report["summary"]
+        timestamp_readable = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        md_lines = [
+            "# Complex Scenario Test Results",
+            "",
+            f"**Generated:** {timestamp_readable}",
+            f"**Report Version:** {timestamp}",
+            "",
+            "---",
+            "",
+            "## Executive Summary",
+            "",
+            f"- **Total Scenarios Tested:** {summary['total_scenarios']}",
+            f"- **Passed:** {summary['passed']} ({summary['pass_rate']:.1%})",
+            f"- **Failed:** {summary['failed']}",
+            f"- **Average Response Time:** {summary['avg_response_time']:.2f}s",
+            f"- **Average Final Score:** {summary['avg_final_score']:.2f}/1.0",
+            "",
+            "### Overall Performance",
+            "",
+        ]
+
+        # Performance rating
+        pass_rate = summary["pass_rate"]
+        if pass_rate >= 0.95:
+            rating = "✅ **Excellent**"
+        elif pass_rate >= 0.85:
+            rating = "✅ **Good**"
+        elif pass_rate >= 0.70:
+            rating = "⚠️ **Acceptable**"
+        else:
+            rating = "❌ **Needs Improvement**"
+
+        md_lines.extend(
+            [
+                f"**Performance Rating:** {rating}",
+                "",
+                "---",
+                "",
+                "## Performance by Difficulty",
+                "",
+            ]
+        )
+
+        # Difficulty breakdown
+        if report["difficulty_breakdown"]:
+            md_lines.append(
+                "| Difficulty | Count | Passed | Pass Rate | Avg Score | Avg Time |"
+            )
+            md_lines.append(
+                "|-----------|-------|--------|----------|----------|----------|"
+            )
+            for difficulty, stats in sorted(report["difficulty_breakdown"].items()):
+                pass_rate = (
+                    stats["passed"] / stats["count"] if stats["count"] > 0 else 0
+                )
+                md_lines.append(
+                    f"| {difficulty.upper()} | {stats['count']} | {stats['passed']} | "
+                    f"{pass_rate:.1%} | {stats['avg_score']:.2f} | {stats['avg_time']:.2f}s |"
+                )
+        else:
+            md_lines.append("*No scenarios were run.*")
+
+        md_lines.extend(
+            [
+                "",
+                "---",
+                "",
+                "## Score Breakdown by Metric",
+                "",
+            ]
+        )
+
+        # Score breakdown
+        md_lines.append("| Metric | Average Score |")
+        md_lines.append("|--------|---------------|")
+        for metric, score in report["score_breakdown"].items():
+            metric_name = metric.replace("_", " ").title()
+            md_lines.append(f"| {metric_name} | {score:.2f}/1.0 |")
+
+        # Detailed results
+        if self.results:
+            md_lines.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    "## Detailed Results",
+                    "",
+                ]
+            )
+
+            for i, result in enumerate(self.results, 1):
+                status = "✅ PASS" if result.get("passed", False) else "❌ FAIL"
+                md_lines.extend(
+                    [
+                        f"### {i}. {result.get('query', 'Unknown Query')}",
+                        "",
+                        f"**Status:** {status}",
+                        f"**Difficulty:** {result.get('difficulty', 'unknown')}",
+                        f"**Scenario ID:** {result.get('scenario_id', 'unknown')}",
+                        f"**Response Time:** {result.get('response_time', 0):.2f}s",
+                        "",
+                    ]
+                )
+
+                if "scores" in result:
+                    md_lines.append("**Scores:**")
+                    for metric, score in result["scores"].items():
+                        metric_name = metric.replace("_", " ").title()
+                        md_lines.append(f"- {metric_name}: {score:.2f}/1.0")
+                    md_lines.append("")
+
+                md_lines.extend(
+                    [
+                        f"**Final Score:** {result.get('final_score', 0):.2f}/1.0",
+                        "",
+                    ]
+                )
+
+                if "response" in result:
+                    response_preview = result["response"][:500]
+                    if len(result["response"]) > 500:
+                        response_preview += "..."
+                    md_lines.extend(
+                        [
+                            "**Response:**",
+                            "```",
+                            response_preview,
+                            "```",
+                            "",
+                        ]
+                    )
+
+                if "tool_calls" in result and result["tool_calls"]:
+                    md_lines.extend(
+                        [
+                            f"**Tools Used:** {', '.join(result['tool_calls'])}",
+                            "",
+                        ]
+                    )
+
+                if "error" in result:
+                    md_lines.extend(
+                        [
+                            "**Error:**",
+                            "```",
+                            result["error"],
+                            "```",
+                            "",
+                        ]
+                    )
+
+                md_lines.append("---")
+                md_lines.append("")
+
+        # Failures section
+        if report["failures"]:
+            md_lines.extend(
+                [
+                    "## Failed Scenarios",
+                    "",
+                ]
+            )
+
+            for failure in report["failures"]:
+                md_lines.extend(
+                    [
+                        f"### {failure['query']}",
+                        f"- **ID:** {failure['id']}",
+                        f"- **Difficulty:** {failure.get('difficulty', 'unknown')}",
+                        f"- **Score:** {failure['final_score']:.2f}/1.0",
+                    ]
+                )
+                if "error" in failure:
+                    md_lines.append(f"- **Error:** {failure['error']}")
+                md_lines.append("")
+
+        # Recommendations
+        md_lines.extend(
+            [
+                "---",
+                "",
+                "## Recommendations",
+                "",
+            ]
+        )
+
+        if summary["total_scenarios"] == 0:
+            md_lines.append(
+                "- No scenarios were run. Generate scenarios using `test_complex_scenarios.py`"
+            )
+        elif summary["pass_rate"] < 0.70:
+            md_lines.extend(
+                [
+                    "- **Critical:** Pass rate is below acceptable threshold (70%)",
+                    "- Review failed scenarios and improve tool selection logic",
+                    "- Check LLM responses for accuracy and completeness",
+                    "- Consider improving tool descriptions and examples",
+                ]
+            )
+        elif summary["pass_rate"] < 0.85:
+            md_lines.extend(
+                [
+                    "- Pass rate is good but could be improved",
+                    "- Focus on scenarios with low scores",
+                    "- Review tool selection accuracy",
+                    "- Optimize response times for better user experience",
+                ]
+            )
+        else:
+            md_lines.extend(
+                [
+                    "- Excellent performance!",
+                    "- Continue monitoring for regression",
+                    "- Consider adding more complex scenarios to test edge cases",
+                ]
+            )
+
+        if summary["avg_response_time"] > 5.0:
+            md_lines.append(
+                "- **Performance:** Average response time is high. Consider optimizing queries or caching."
+            )
+
+        md_lines.extend(
+            [
+                "",
+                "---",
+                "",
+                f"*Report generated by test_complex_scenarios_runner.py*",
+                f"*For detailed JSON data, see the corresponding complex_results_{timestamp}.json file*",
+            ]
+        )
+
+        return "\n".join(md_lines)
+
 
 # Main execution
 if __name__ == "__main__":
@@ -439,18 +824,88 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Get project root directory
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
     # Load transaction data
+    transactions_file = os.path.join(project_root, "data", "transactions.csv")
     try:
-        df = pd.read_csv("data/transactions.csv")
+        df = pd.read_csv(transactions_file)
         print(f"Loaded {len(df)} transactions")
     except FileNotFoundError:
-        print("Error: Transaction data not found. Run generate_sample.py first.")
+        print(f"Error: Transaction data not found at {transactions_file}")
+        print("Run generate_sample.py first or ensure data/transactions.csv exists.")
         sys.exit(1)
 
+    # Check if scenarios file exists, generate if missing
+    scenarios_file = os.path.join(
+        project_root, "test_results", "complex_scenarios.json"
+    )
+    if not os.path.exists(scenarios_file):
+        print("\n" + "=" * 80)
+        print("Scenarios file not found. Generating scenarios...")
+        print("=" * 80)
+        try:
+            # Import and use ComplexTestScenarios to generate scenarios
+            sys.path.insert(0, os.path.join(project_root, "test_results"))
+            from test_complex_scenarios import ComplexTestScenarios
+
+            scenario_gen = ComplexTestScenarios(df)
+            scenarios = scenario_gen.export_test_suite(filename=scenarios_file)
+            print(f"✓ Generated {len(scenarios)} scenarios")
+
+            # Also generate evaluation framework if missing
+            framework_file = os.path.join(
+                project_root, "test_results", "evaluation_framework.json"
+            )
+            if (
+                not os.path.exists(framework_file)
+                or os.path.getsize(framework_file) == 0
+            ):
+                framework = scenario_gen.create_evaluation_framework()
+                with open(framework_file, "w") as f:
+                    json.dump(framework, f, indent=2)
+                print(f"✓ Generated evaluation framework")
+        except Exception as e:
+            print(f"Warning: Could not auto-generate scenarios: {e}")
+            print("You can manually generate scenarios by running:")
+            print("  python test_results/test_complex_scenarios.py")
+            print("\nContinuing with empty scenarios list...")
+
     # Initialize agent with data
-    agent = FinancialAgent()
-    transactions = df.to_dict("records")
-    agent.vector_store.add_transactions(transactions)
+    try:
+        agent = FinancialAgent()
+        transactions = df.to_dict("records")
+        agent.vector_store.add_transactions(transactions)
+    except Exception as e:
+        error_msg = str(e)
+        if "401" in error_msg or "Unauthorized" in error_msg or "API key" in error_msg:
+            print("\n" + "=" * 80)
+            print("❌ QDRANT AUTHENTICATION ERROR")
+            print("=" * 80)
+            print(
+                "\nThe Qdrant connection requires authentication but the API key is missing or incorrect."
+            )
+            print("\nPossible solutions:")
+            print("1. For LOCAL Qdrant (no auth needed):")
+            print("   - Remove QDRANT_API_KEY from .env file")
+            print("   - Keep only: QDRANT_URL=http://localhost:6333")
+            print("   - Or remove both to use default localhost:6333")
+            print("\n2. For REMOTE Qdrant Cloud:")
+            print("   - Ensure QDRANT_API_KEY is set correctly in .env")
+            print("   - Ensure QDRANT_URL points to your Qdrant Cloud instance")
+            print("   - Format: QDRANT_URL=https://your-cluster-id.qdrant.io")
+            print("\n3. Check if Qdrant is running:")
+            print("   - Local: docker run -p 6333:6333 qdrant/qdrant")
+            print("   - Or check your remote Qdrant instance status")
+            print("\n" + "=" * 80)
+        else:
+            print(f"\n❌ Error initializing agent: {error_msg}")
+            print("\nTroubleshooting:")
+            print("- Ensure Qdrant is running (local or remote)")
+            print("- Check your .env file configuration")
+            print("- Verify network connectivity to Qdrant instance")
+        sys.exit(1)
 
     # Run evaluator
     evaluator = ComplexScenarioEvaluator(agent)
@@ -462,13 +917,14 @@ if __name__ == "__main__":
         )
         if scenario:
             evaluator.evaluate_single_scenario(scenario)
-            evaluator.export_results()
+            json_file, md_file = evaluator.export_results()
         else:
             print(f"Scenario {args.scenario_id} not found")
+            sys.exit(1)
     else:
         # Run all or filtered scenarios
         evaluator.run_all_scenarios(difficulty_filter=args.difficulty)
-        evaluator.export_results()
+        json_file, md_file = evaluator.export_results()
 
     print("\n" + "=" * 80)
     print("Testing complete!")
