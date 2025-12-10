@@ -7,7 +7,7 @@ This directory contains test results and quality reports for the Financial Agent
 To run the response quality tests:
 
 ```bash
-python test_response_quality.py
+python test_results/test_response_quality.py
 ```
 
 ## Test Coverage
@@ -102,4 +102,5 @@ For ongoing quality monitoring:
 - Tests require Qdrant vector store to be running
 - Test data is loaded from `data/transactions.csv`
 - All queries are logged using the structured logger
+- Create Comparison report with the last comparison_report_v[x]
 

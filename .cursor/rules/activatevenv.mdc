@@ -1,0 +1,13 @@
+---
+description: Ensure the project's .venv is active for all Python runs.
+alwaysApply: true
+---
+
+# Use Project Virtual Environment
+
+The agent must always activate the local project virtual environment located at `./.venv` before running any Python script or using `uv`.
+
+*   **Activation Command (Linux/macOS):** `source .venv/bin/activate`
+*   **Activation Command (Windows CMD):** `.venv\\Scripts\\activate`
+*   Ensure subsequent commands run within the activated shell session.
+

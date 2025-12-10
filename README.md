@@ -121,6 +121,28 @@ The following 15 questions are used for response quality testing and cover vario
 
 Run quality tests with: `python test_response_quality.py`
 
+### **Complex Test Scenarios (15 Advanced Questions)**
+
+The following 15 complex scenarios test multi-step reasoning, comparative analysis, temporal patterns, and complex aggregations:
+
+1. Which category did I spend more on in February: food or shopping?
+2. Did my food spending increase or decrease from January to February?
+3. What were my 3 largest shopping purchases at Amazon?
+4. What percentage of my total spending went to subscriptions?
+5. What's my average grocery spending per week, excluding any trips over $100?
+6. How much did I spend at coffee shops (Starbucks and Dunkin) in total?
+7. Show me all entertainment expenses over $20
+8. How many times per week do I go to Starbucks on average?
+9. At Amazon, did I spend more on shopping or entertainment?
+10. Did I make any purchases at Target in January?
+11. Which months did I spend over $300 on food?
+12. What's the ratio of my dining out expenses to grocery expenses?
+13. How much have I spent on health this quarter?
+14. Show me all gas station transactions where I also bought food
+15. Find all shopping transactions over $50 at either Amazon or Target in February
+
+Run complex scenario tests with: `python test_results/complex_scenarios_tests_runner.py`
+
 ## Current Architecture
 
 Analyzing the architecture to determine if this is a RAG agent:
