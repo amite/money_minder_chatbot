@@ -8,33 +8,53 @@ class SearchTransactionsInput(BaseModel):
     """Input schema for search_transactions tool"""
 
     query: str = Field(description="Search query describing what to look for")
-    limit: int = Field(default=10, description="Maximum number of results")
+    limit: int = Field(default=10, description="Maximum number of results to return")
+    category: Optional[str] = Field(
+        default=None,
+        description="Optional: Filter by category (food, shopping, entertainment, transport, utilities, health)",
+    )
+    sort_by: Optional[str] = Field(
+        default=None,
+        description="Optional: Sort results - 'amount_desc' (largest first), 'amount_asc' (smallest first), 'date_desc' (newest first), 'date_asc' (oldest first)",
+    )
 
 
 class SearchTransactionsTool(BaseTool):
     """Tool for searching transactions by description, category, or merchant"""
 
     name: str = "search_transactions"
-    description: str = """Search for transactions by description keywords or text.
+    description: str = """Search for transactions by description keywords or text, with optional filtering and sorting.
 
 USE THIS WHEN:
 - User searches by description keywords (e.g., "coffee", "subscription", "gas")
 - User wants to find transactions matching text in descriptions
 - User asks "Find my [item] purchases" or "Show me [keyword] transactions"
+- User asks for "top N", "largest", "smallest", "most expensive" transactions
 - User wants to search across all merchants/categories by description
 
+ESPECIALLY USE FOR "TOP N" QUERIES:
+✓ "What were my 3 largest shopping purchases at Amazon?" 
+  → search_transactions(query="Amazon", category="shopping", sort_by="amount_desc", limit=3)
+✓ "Show me my 5 most expensive food purchases"
+  → search_transactions(query="food", sort_by="amount_desc", limit=5)
+✓ "Find my smallest transport expenses"
+  → search_transactions(query="transport", sort_by="amount_asc", limit=5)
+
+FOR MULTI-STEP QUERIES (call this tool MULTIPLE TIMES):
+✓ Multiple keyword searches: "Find all coffee shops (Starbucks and Dunkin)"
+  → Call #1: search_transactions(query="Starbucks")
+  → Call #2: search_transactions(query="Dunkin")
+  → Then combine results in your response
+
 DO NOT USE FOR:
-- Queries about a specific merchant (use analyze_merchant)
-- Queries about a specific category (use analyze_by_category)
+- Queries about total spending (use analyze_merchant or analyze_by_category)
 - Queries about spending summaries (use get_spending_summary)
 
 Examples:
 ✓ "Find my coffee purchases"
-✓ "Show me all my Spotify transactions" (searching by description)
-✓ "Search for subscription payments"
-✓ "Find transactions with 'grocery' in description"
-✗ "Show my Amazon spending" (use analyze_merchant - specific merchant)
-✗ "How much did I spend on food?" (use analyze_by_category - specific category)"""
+✓ "Show me all my Spotify transactions"
+✓ "What were my 3 largest purchases at Amazon?" (use sort_by="amount_desc", limit=3)
+✗ "How much did I spend on food?" (use analyze_by_category - asking for total)"""
     args_schema: type[BaseModel] = SearchTransactionsInput
     _agent: FinancialAgent = PrivateAttr()
 
@@ -42,11 +62,23 @@ Examples:
         super().__init__(**kwargs)
         self._agent = agent
 
-    def _run(self, query: str, limit: int = 10) -> str:
+    def _run(
+        self,
+        query: str,
+        limit: int = 10,
+        category: Optional[str] = None,
+        sort_by: Optional[str] = None,
+    ) -> str:
         """Execute the search_transactions tool"""
-        return self._agent.search_transactions(query, limit)
+        return self._agent.search_transactions(query, limit, category, sort_by)
 
-    async def _arun(self, query: str, limit: int = 10) -> str:
+    async def _arun(
+        self,
+        query: str,
+        limit: int = 10,
+        category: Optional[str] = None,
+        sort_by: Optional[str] = None,
+    ) -> str:
         """Async execution (not implemented)"""
         raise NotImplementedError("Async not supported")
 
@@ -77,6 +109,17 @@ USE THIS WHEN:
 - User asks about spending in ONE specific category (food, shopping, entertainment, transport, utilities, health)
 - User mentions category WITHOUT mentioning a specific merchant
 - User asks "How much did I spend on [category]?"
+
+FOR MULTI-STEP QUERIES (call this tool MULTIPLE TIMES):
+✓ Comparative queries: "Compare food vs shopping in February"
+  → Call #1: analyze_by_category(category="food", start_date="2024-02-01", end_date="2024-02-29")
+  → Call #2: analyze_by_category(category="shopping", start_date="2024-02-01", end_date="2024-02-29")
+  → Then compare the totals in your response
+
+✓ Trend analysis: "Did food spending increase from January to February?"
+  → Call #1: analyze_by_category(category="food", start_date="2024-01-01", end_date="2024-01-31")
+  → Call #2: analyze_by_category(category="food", start_date="2024-02-01", end_date="2024-02-29")
+  → Then calculate the change and report the trend
 
 DO NOT USE FOR:
 - Queries mentioning a specific merchant (use analyze_merchant instead)
@@ -181,6 +224,21 @@ USE THIS WHEN:
 - User asks "How much at [merchant]?" or "Show me [merchant] spending"
 - User mentions BOTH merchant AND category (prioritize merchant)
 - User asks about merchant transactions with date filters
+
+FOR MULTI-STEP QUERIES (call this tool MULTIPLE TIMES):
+✓ Comparative merchant analysis: "Compare my Amazon vs Walmart spending in Q1"
+  → Call #1: analyze_merchant(merchant="Amazon", start_date="2024-01-01", end_date="2024-03-31")
+  → Call #2: analyze_merchant(merchant="Walmart", start_date="2024-01-01", end_date="2024-03-31")
+  → Then compare the totals in your response
+
+✓ Category breakdown at merchant: "At Amazon, did I spend more on shopping or entertainment?"
+  → Call #1: analyze_merchant(merchant="Amazon", group_by_category=True)
+  → Then compare the category totals from the results
+
+✓ Multiple merchants: "Show me spending at Starbucks and Dunkin in February"
+  → Call #1: analyze_merchant(merchant="Starbucks", start_date="2024-02-01", end_date="2024-02-29")
+  → Call #2: analyze_merchant(merchant="Dunkin", start_date="2024-02-01", end_date="2024-02-29")
+  → Then present both results
 
 DO NOT USE FOR:
 - General category queries without merchant mention

@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent import FinancialAgent
 from langchain_ollama import ChatOllama
-from langchain.agents import create_agent
+from langgraph.prebuilt import create_react_agent
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import HumanMessage
 
@@ -139,7 +139,7 @@ class ComplexScenarioEvaluator:
                     self.tool_calls.append(tool_name)
 
             callback = ToolCallTracker()
-            agent_executor = create_agent(llm, tools)
+            agent_executor = create_react_agent(llm, tools)
 
             # Execute query
             result = agent_executor.invoke(

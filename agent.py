@@ -13,37 +13,57 @@ class FinancialAgent:
                 "type": "function",
                 "function": {
                     "name": "search_transactions",
-                    "description": """Search for transactions by description keywords or text.
+                    "description": """Search for transactions by description keywords or text, with optional filtering and sorting.
 
 USE THIS WHEN:
 - User searches by description keywords (e.g., "coffee", "subscription", "gas")
 - User wants to find transactions matching text in descriptions
 - User asks "Find my [item] purchases" or "Show me [keyword] transactions"
+- User asks for "top N", "largest", "smallest", "most expensive" transactions
 - User wants to search across all merchants/categories by description
 
+ESPECIALLY USE FOR "TOP N" QUERIES:
+✓ "What were my 3 largest shopping purchases at Amazon?" 
+  → search_transactions(query="Amazon", category="shopping", sort_by="amount_desc", limit=3)
+✓ "Show me my 5 most expensive food purchases"
+  → search_transactions(query="food", sort_by="amount_desc", limit=5)
+✓ "Find my smallest transport expenses"
+  → search_transactions(query="transport", sort_by="amount_asc", limit=5)
+
 DO NOT USE FOR:
-- Queries about a specific merchant (use analyze_merchant)
-- Queries about a specific category (use analyze_by_category)
+- Queries about total spending (use analyze_merchant or analyze_by_category)
 - Queries about spending summaries (use get_spending_summary)
 
 Examples:
 ✓ "Find my coffee purchases"
-✓ "Show me all my Spotify transactions" (searching by description)
-✓ "Search for subscription payments"
-✓ "Find transactions with 'grocery' in description"
-✗ "Show my Amazon spending" (use analyze_merchant - specific merchant)
-✗ "How much did I spend on food?" (use analyze_by_category - specific category)""",
+✓ "Show me all my Spotify transactions"
+✓ "What were my 3 largest purchases at Amazon?" (use sort_by="amount_desc", limit=3)
+✗ "How much did I spend on food?" (use analyze_by_category - asking for total)""",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "query": {
                                 "type": "string",
-                                "description": "Search query describing what to look for",
+                                "description": "Search query describing what to look for (merchant name, keywords, etc.)",
                             },
                             "limit": {
                                 "type": "integer",
-                                "description": "Maximum number of results",
+                                "description": "Maximum number of results to return",
                                 "default": 10,
+                            },
+                            "category": {
+                                "type": "string",
+                                "description": "Optional: Filter by category (food, shopping, entertainment, transport, utilities, health)",
+                            },
+                            "sort_by": {
+                                "type": "string",
+                                "description": "Optional: Sort results - 'amount_desc' (largest first), 'amount_asc' (smallest first), 'date_desc' (newest first), 'date_asc' (oldest first)",
+                                "enum": [
+                                    "amount_desc",
+                                    "amount_asc",
+                                    "date_desc",
+                                    "date_asc",
+                                ],
                             },
                         },
                         "required": ["query"],
@@ -164,10 +184,50 @@ Examples:
             },
         ]
 
-    def search_transactions(self, query: str, limit: int = 10) -> str:
-        """Tool implementation: Search transactions"""
-        results = self.vector_store.search_by_description(query, limit)
-        return self._format_transactions(results)
+    def search_transactions(
+        self,
+        query: str,
+        limit: int = 10,
+        category: Optional[str] = None,
+        sort_by: Optional[str] = None,
+    ) -> str:
+        """Tool implementation: Search transactions with filtering and sorting"""
+        # Get initial results from vector search
+        results = self.vector_store.search_by_description(
+            query, limit * 3
+        )  # Get more for filtering
+
+        if not results:
+            return "No transactions found"
+
+        # Convert to DataFrame for easier manipulation
+        df = pd.DataFrame(results)
+
+        # Filter by category if specified
+        if category:
+            df = df[df["category"].str.lower() == category.lower()]
+
+        # Sort if specified
+        if sort_by:
+            df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+            if sort_by == "amount_desc":
+                df = df.sort_values("amount", ascending=False)  # type: ignore
+            elif sort_by == "amount_asc":
+                df = df.sort_values("amount", ascending=True)  # type: ignore
+            elif sort_by == "date_desc":
+                df = df.sort_values("date", ascending=False)  # type: ignore
+            elif sort_by == "date_asc":
+                df = df.sort_values("date", ascending=True)  # type: ignore
+
+        # Apply limit after filtering and sorting
+        df = df.head(limit)
+
+        # Convert back to list of dicts
+        filtered_results = df.to_dict("records")  # type: ignore
+
+        return self._format_transactions(filtered_results)
 
     def search_transactions_df(self, query: str, limit: int = 10) -> pd.DataFrame:
         """Get search results as DataFrame"""
